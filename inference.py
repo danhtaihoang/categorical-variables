@@ -155,8 +155,12 @@ def fit_multiplicative(s,n,m):
                         xab_av = xab.mean(axis=0)
                         dxab = xab - xab_av
 
-                        h_ab = h[which_ab,ia] - h[which_ab,ib]                    
-                        ha = np.divide(eps_ab*h_ab,np.tanh(h_ab/2.), out=np.zeros_like(h_ab), where=h_ab!=0)                        
+                        h_ab = h[which_ab,ia] - h[which_ab,ib]
+
+                        which_non_zero = h_ab!=0
+
+                        ha[which_non_zero] = eps_ab[which_non_zero]*h_ab[which_non_zero]/np.tanh(h_ab[which_non_zero]/2.)
+                        #ha = np.divide(eps_ab*h_ab,np.tanh(h_ab/2.), out=np.zeros_like(h_ab), where=h_ab!=0)                        
 
                         dhdx = dxab*((ha - ha.mean())[:,np.newaxis])
                         dhdx_av = dhdx.mean(axis=0)
@@ -174,4 +178,62 @@ def fit_multiplicative(s,n,m):
         w_infer[i2:,i1:i2] = w[i1:,:]
         h0_infer[i1:i2] = h0
 
+    return w_infer,h0_infer
+
+#=========================================================================================
+## 2018.12.10: h = h0 + w.s
+def fit_additive(s,n,m):
+    nloop = 20
+    i1tab,i2tab = itab(n,m)
+
+    nm = n*m
+    nm1 = nm - m
+
+    w_infer = np.zeros((nm,nm))
+    h0_infer = np.zeros(nm)
+
+    wini = np.random.normal(0.0,1./np.sqrt(nm),size=(nm1,nm))
+    h0ini = np.random.normal(0.0,1./np.sqrt(nm),size=nm) 
+    for i in range(n):
+        i1,i2 = i1tab[i],i2tab[i]
+
+        # remove column i
+        x = np.hstack([s[:,:i1],s[:,i2:]])
+        y = s.copy()
+
+        x_av = np.mean(x,axis=0)
+        dx = x - x_av
+        c = np.cov(dx,rowvar=False,bias=True)
+        c_inv = linalg.pinv(c,rcond=1e-15)
+
+        w = wini[:,i1:i2].copy()
+        h0 = h0ini[i1:i2].copy()
+        cost = np.full(nloop,100.)         
+        for iloop in range(nloop):
+            h = h0[np.newaxis,:] + x.dot(w)
+
+            p = np.exp(h)
+            p_sum = p.sum(axis=1)            
+            p /= p_sum[:,np.newaxis]
+
+            cost[iloop] = ((y[:,i1:i2] - p[:,:])**2).mean()
+            if iloop > 1 and cost[iloop] >= cost[iloop-1]: break
+
+            h += y[:,i1:i2] - p
+
+            h_av = h.mean(axis=0)
+            dh = h - h_av
+            
+            dhdx = dh[:,np.newaxis,:]*dx[:,:,np.newaxis]
+            dhdx_av = dhdx.mean(axis=0)
+            w = c_inv.dot(dhdx_av)            
+            w -= w.mean(axis=0) 
+
+            h0 = h_av - x_av.dot(w)
+            h0 -= h0.mean()
+
+        w_infer[:i1,i1:i2] = w[:i1,:]
+        w_infer[i2:,i1:i2] = w[i1:,:]
+        h0_infer[i1:i2] = h0 - h0.mean()
+    
     return w_infer,h0_infer
